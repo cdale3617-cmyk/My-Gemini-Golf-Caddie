@@ -9,7 +9,7 @@ export async function fetchCourseFeatures(query, fetchImpl = fetch) {
   let lastError;
   for (const endpoint of OVERPASS_ENDPOINTS) {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 15000);
+        const timeout = setTimeout(() => controller.abort(), 30000);
     try {
       const response = await fetchImpl(endpoint, {
         method: "POST",
