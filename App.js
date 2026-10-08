@@ -7,6 +7,8 @@ import { useKeepAwake } from "expo-keep-awake";
 import { ExpoSpeechRecognitionModule, useSpeechRecognitionEvent } from "expo-speech-recognition";
 import { StatusBar as ExpoStatusBar } from "expo-status-bar";
 import { calculatePlaysLike, displayToMetres, haversineMetres, makeDefaultBag, makeDefaultRound, metresToDisplay, recommendClub } from "./src/caddieEngine.js";
+import HoleMap from "./src/HoleMap.js";
+import { featuresForHole, greenPinsByHole, osmCourseQuery } from "./src/courseMap.js";
 
 const KEY="gemini-golf-caddie-v1", GOLD="#D9B45B", GREEN="#0D241B", PANEL="#142D23", MUTED="#AAB5AC", WHITE="#F5F4EC";
 
@@ -19,33 +21,21 @@ function Field({label,value,onChangeText,type="default",placeholder}) {
 function Choice({values,value,onChange}) {
   return <View style={S.choiceRow}>{values.map(x=><Pressable key={x.value} onPress={()=>onChange(x.value)} style={[S.choice,value===x.value&&S.choiceOn]}><Text style={[S.choiceText,value===x.value&&{color:"#FFF1BE"}]}>{x.label}</Text></Pressable>)}</View>;
 }
-function HolePicture({hole,distance}) {
-  const greenTop=hole.par===3?62:hole.par===5?40:50;
-  return <View style={S.holeCard}>
-    <View style={S.holeHead}><Text style={S.goldLabel}>HOLE {hole.number} · PAR {hole.par}</Text><Text style={S.whiteSmall}>{distance==null?"PIN NOT SET":distance+" to pin"}</Text></View>
-    <View style={S.art}><View style={S.fairwayWide}/><View style={S.fairwayNarrow}/>
-      <View style={[S.greenShape,{top:greenTop}]}/><View style={[S.flagPole,{top:greenTop-15}]}/><View style={[S.flag,{top:greenTop-15}]}/>
-      <View style={S.bunkerL}/><View style={S.bunkerR}/><View style={S.water}/><View style={S.tee}/>
-      <Text style={[S.artGreenLabel,{top:greenTop+35}]}>GREEN</Text><Text style={S.teeLabel}>TEE</Text>
-      <Text style={S.artNote}>HOLE SHAPE ILLUSTRATION · NOT A COURSE MAP</Text>
-    </View>
-  </View>;
-}
-
 export default function App() {
   useKeepAwake();
   const [tab,setTab]=useState("Caddie"), [round,setRound]=useState(makeDefaultRound), [bag,setBag]=useState(makeDefaultBag);
   const [settings,setSettings]=useState({distanceUnit:"m",windUnit:"km/h",tournamentMode:false});
   const [loaded,setLoaded]=useState(false), [holeIndex,setHoleIndex]=useState(0), [gps,setGps]=useState(null), [gpsError,setGpsError]=useState("");
   const [gpsOn,setGpsOn]=useState(false), [windKmh,setWindKmh]=useState("0"), [windDir,setWindDir]=useState("calm"), [elevation,setElevation]=useState("0");
+  const [courseResults,setCourseResults]=useState([]), [courseFeatures,setCourseFeatures]=useState([]), [courseStatus,setCourseStatus]=useState("Search for a course to load mapped hole features."), [courseBusy,setCourseBusy]=useState(false);
   const [shotType,setShotType]=useState("stock"), [transcript,setTranscript]=useState(""), [voiceStatus,setVoiceStatus]=useState("Voice is off"), [scoreInput,setScoreInput]=useState("");
   const gpsWatch=useRef(null), hole=round.holes[holeIndex], unit=settings.distanceUnit;
 
   useEffect(()=>{
-    (async()=>{try{const raw=await AsyncStorage.getItem(KEY);if(raw){const d=JSON.parse(raw);if(d.round?.holes?.length===18)setRound(d.round);if(d.bag?.length)setBag(d.bag);if(d.settings)setSettings(s=>({...s,...d.settings}));}}catch{setGpsError("Saved round could not be read. A fresh round is ready.");}finally{setLoaded(true);}})();
+    (async()=>{try{const raw=await AsyncStorage.getItem(KEY);if(raw){const d=JSON.parse(raw);if(d.round?.holes?.length===18)setRound(d.round);if(d.bag?.length)setBag(d.bag);if(d.settings)setSettings(s=>({...s,...d.settings}));if(Array.isArray(d.courseFeatures)){setCourseFeatures(d.courseFeatures);if(d.courseFeatures.length)setCourseStatus("Saved OpenStreetMap course features loaded from this phone.");}}}catch{setGpsError("Saved round could not be read. A fresh round is ready.");}finally{setLoaded(true);}})();
     return ()=>{gpsWatch.current?.remove();try{ExpoSpeechRecognitionModule.abort();}catch{}};
   },[]);
-  useEffect(()=>{if(loaded)AsyncStorage.setItem(KEY,JSON.stringify({round,bag,settings})).catch(()=>setGpsError("Could not save this change on the device."));},[round,bag,settings,loaded]);
+  useEffect(()=>{if(loaded)AsyncStorage.setItem(KEY,JSON.stringify({round,bag,settings,courseFeatures})).catch(()=>setGpsError("Could not save this change on the device."));},[round,bag,settings,courseFeatures,loaded]);
 
   const distanceM=useMemo(()=>haversineMetres(gps,hole.pin),[gps,hole.pin]);
   const elevationM=Number(elevation)*(unit==="yd"?0.9144:1);
@@ -62,6 +52,33 @@ export default function App() {
     }catch{setGpsError("GPS could not get a fix. Turn Location on and try outside.");setGpsOn(false);}
   }
   function stopGps(){gpsWatch.current?.remove();gpsWatch.current=null;setGpsOn(false);}
+  async function loadCourseFeatures(result){
+    const lat=Number(result.lat), lon=Number(result.lon);
+    if(!Number.isFinite(lat)||!Number.isFinite(lon)){setCourseStatus("This course has no mapped location.");return;}
+    setCourseBusy(true);setCourseStatus("Loading mapped holes…");
+    try{
+      const query=osmCourseQuery(lat,lon);
+      const response=await fetch("https://overpass-api.de/api/interpreter",{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded; charset=UTF-8","Accept":"application/json"},body:"data="+encodeURIComponent(query)});
+      if(!response.ok)throw new Error("Course map service returned "+response.status);
+      const data=await response.json();const elements=Array.isArray(data.elements)?data.elements:[];setCourseFeatures(elements);
+      const pins=greenPinsByHole(elements);
+      setRound(r=>({...r,courseName:result.name,holes:r.holes.map(h=>pins[h.number]?{...h,pin:pins[h.number]}:h)}));
+      setCourseStatus(elements.length?"Course features loaded from OpenStreetMap.":"No detailed holes are mapped here yet. You can still save a green pin with GPS.");
+    }catch(e){setCourseFeatures([]);setCourseStatus("Could not load course features. Check internet and try again.");}
+    finally{setCourseBusy(false);}
+  }
+  async function searchCourse(){
+    const query=round.courseName.trim();if(!query){Alert.alert("Enter a course","Type the course name first.");return;}
+    setCourseBusy(true);setCourseStatus("Searching OpenStreetMap…");setCourseResults([]);
+    try{
+      const url="https://nominatim.openstreetmap.org/search?format=jsonv2&limit=6&q="+encodeURIComponent(query+" golf course");
+      const response=await fetch(url,{headers:{Accept:"application/json","User-Agent":"MyGeminiGolfCaddie/1.0"}});if(!response.ok)throw new Error("Course search returned "+response.status);
+      const results=(await response.json()).map(item=>({lat:item.lat,lon:item.lon,name:item.name||item.display_name?.split(",")[0]||query,displayName:item.display_name||item.name||query}));
+      if(!results.length){setCourseStatus("No course result found. Try the course name and town.");return;}
+      setCourseResults(results);setCourseStatus("Choose the matching course below.");
+    }catch{setCourseStatus("Course search failed. Check internet and try again.");}
+    finally{setCourseBusy(false);}
+  }
   function markGreen(){
     if(!gps){Alert.alert("GPS needed","Start GPS and wait for a location fix before marking the green.");return;}
     Alert.alert("Save green pin here?","The current GPS position will be saved for this hole on this phone.",[{text:"Cancel",style:"cancel"},{text:"Save pin",onPress:()=>editHole({pin:{latitude:gps.latitude,longitude:gps.longitude}})}]);
@@ -105,8 +122,11 @@ export default function App() {
       {!loaded&&<Text style={S.muted}>Opening saved round…</Text>}
       {tab==="Caddie"&&<>
         <View style={S.courseRow}><View style={{flex:1}}><Text style={S.goldLabel}>CURRENT COURSE</Text><TextInput value={round.courseName} onChangeText={v=>setRound(r=>({...r,courseName:v}))} placeholder="Enter course name" placeholderTextColor="#829087" style={S.courseInput}/></View><Btn label={gpsOn?"STOP GPS":"START GPS"} primary={!gpsOn} small onPress={gpsOn?stopGps:startGps}/></View>
+        <Btn label={courseBusy?"SEARCHING…":"FIND COURSE MAP"} onPress={searchCourse} small/>
+        {courseResults.map((item,i)=><Pressable key={item.lat+":"+item.lon+":"+i} onPress={()=>{setCourseResults([]);loadCourseFeatures(item);}} style={S.courseResult}><Text style={S.courseResultName}>{item.name}</Text><Text style={S.courseResultSub}>{item.displayName}</Text></Pressable>)}
         <View style={S.holeNav}><Btn label="‹ PREV" small onPress={()=>setHole(holeIndex-1)}/><View style={{alignItems:"center"}}><Text style={S.holeTitle}>HOLE {hole.number}</Text><Text style={S.muted}>PAR {hole.par} · {metresToDisplay(hole.lengthM,unit)} {unit}</Text></View><Btn label="NEXT ›" small onPress={()=>setHole(holeIndex+1)}/></View>
-        <HolePicture hole={hole} distance={distanceM==null?null:metresToDisplay(distanceM,unit)}/>
+        <View style={S.holeCard}><View style={S.holeHead}><Text style={S.goldLabel}>HOLE {hole.number} · PAR {hole.par}</Text><Text style={S.whiteSmall}>{distanceM==null?"PIN NOT SET":metresToDisplay(distanceM,unit)+" "+unit+" to pin"}</Text></View><HoleMap features={featuresForHole(courseFeatures,hole.number)} status={courseStatus}/></View>
+        <Text style={S.courseStatus}>{courseStatus}</Text>
         <View style={S.pinRow}><Text style={S.muted}>{hole.pin?"Green pin saved for this hole":"Save a pin at the green to start GPS distance"}</Text><Btn label="MARK GREEN HERE" small onPress={markGreen}/></View>
         <View style={S.metrics}><View style={S.metric}><Text style={S.label}>TO PIN</Text><Text style={S.metricValue}>{distanceM==null?"—":metresToDisplay(distanceM,unit)}</Text><Text style={S.muted}>{unit}</Text></View><View style={S.vline}/><View style={S.metric}><Text style={S.label}>PLAYS LIKE</Text><Text style={[S.metricValue,{color:GOLD}]}>{playsLikeM?metresToDisplay(playsLikeM,unit):"—"}</Text><Text style={S.muted}>{distanceM?unit:"set pin"}</Text></View><View style={S.vline}/><View style={S.metric}><Text style={S.label}>CLUB IDEA</Text><Text style={[S.club,{color:GOLD}]}>{club?.name||"—"}</Text><Text style={S.tiny}>edit carry in My Bag</Text></View></View>
         <View style={S.section}><Text style={S.sectionTitle}>SHOT CONDITIONS</Text>
@@ -120,7 +140,7 @@ export default function App() {
       </>}
       {tab==="My Bag"&&<View style={S.section}><Text style={S.pageTitle}>MY BAG</Text><Text style={S.muted}>Edit these example carries to match your own clubs.</Text>{bag.map((c,i)=><View key={c.name} style={S.bagRow}><Text style={S.bagName}>{c.name}</Text><View style={S.bagField}><Text style={S.label}>CARRY ({unit})</Text><TextInput keyboardType="decimal-pad" style={S.smallInput} value={String(metresToDisplay(c.carryM,unit))} onChangeText={v=>editBag(i,{carryM:displayToMetres(v,unit)})}/></View><View style={S.bagField}><Text style={S.label}>LOFT °</Text><TextInput keyboardType="decimal-pad" style={S.smallInput} value={String(c.loft)} onChangeText={v=>editBag(i,{loft:Number(v)||0})}/></View></View>)}</View>}
       {tab==="Scorecard"&&<View style={S.section}><Text style={S.pageTitle}>SCORECARD</Text><Text style={S.muted}>{round.courseName} · saved on this phone</Text><View style={S.scoreEntry}><View style={{flex:1}}><Text style={S.goldLabel}>HOLE {hole.number} · PAR {hole.par}</Text><Field label="SCORE" value={scoreInput} onChangeText={setScoreInput} type="number-pad" placeholder={hole.score||"Enter score"}/></View><Btn label="SAVE" primary small onPress={saveScore}/></View>{round.holes.map((h,i)=><Pressable key={h.number} onPress={()=>setHole(i)} style={[S.scoreRow,i===holeIndex&&{backgroundColor:"#203C30"}]}><Text style={S.scoreHole}>Hole {h.number}</Text><Text style={S.muted}>Par {h.par}</Text><Text style={S.scoreValue}>{h.score||"—"}</Text></Pressable>)}<Btn label="NEW ROUND" onPress={()=>Alert.alert("Start a new round?","This clears hole scores and saved green pins.",[{text:"Cancel",style:"cancel"},{text:"New round",style:"destructive",onPress:()=>{setRound(r=>({...makeDefaultRound(),courseName:r.courseName}));setHoleIndex(0);}}])}/></View>}
-      {tab==="Settings"&&<View style={S.section}><Text style={S.pageTitle}>SETTINGS</Text><Text style={S.sectionTitle}>DISTANCE</Text><Choice value={unit} onChange={v=>setSettings(s=>({...s,distanceUnit:v}))} values={[{label:"METRES",value:"m"},{label:"YARDS",value:"yd"}]}/><Text style={S.sectionTitle}>WIND SPEED</Text><Choice value={settings.windUnit} onChange={v=>setSettings(s=>({...s,windUnit:v}))} values={[{label:"KM/H",value:"km/h"},{label:"MPH",value:"mph"}]}/><Text style={S.sectionTitle}>ROUND MODE</Text><Choice value={settings.tournamentMode?"tournament":"practice"} onChange={v=>setSettings(s=>({...s,tournamentMode:v==="tournament"}))} values={[{label:"PRACTICE",value:"practice"},{label:"TOURNAMENT",value:"tournament"}]}/><Text style={S.notice}>Check your competition’s local rules before using distance advice. Tournament mode turns off manual elevation adjustment.</Text><Text style={S.sectionTitle}>ABOUT THIS BUILD</Text><Text style={S.muted}>GPS distance uses your phone and the green pin you save. The hole picture is an illustration, not a surveyed course map. This first build does not download course geometry or live weather.</Text></View>}
+      {tab==="Settings"&&<View style={S.section}><Text style={S.pageTitle}>SETTINGS</Text><Text style={S.sectionTitle}>DISTANCE</Text><Choice value={unit} onChange={v=>setSettings(s=>({...s,distanceUnit:v}))} values={[{label:"METRES",value:"m"},{label:"YARDS",value:"yd"}]}/><Text style={S.sectionTitle}>WIND SPEED</Text><Choice value={settings.windUnit} onChange={v=>setSettings(s=>({...s,windUnit:v}))} values={[{label:"KM/H",value:"km/h"},{label:"MPH",value:"mph"}]}/><Text style={S.sectionTitle}>ROUND MODE</Text><Choice value={settings.tournamentMode?"tournament":"practice"} onChange={v=>setSettings(s=>({...s,tournamentMode:v==="tournament"}))} values={[{label:"PRACTICE",value:"practice"},{label:"TOURNAMENT",value:"tournament"}]}/><Text style={S.notice}>Check your competition’s local rules before using distance advice. Tournament mode turns off manual elevation adjustment.</Text><Text style={S.sectionTitle}>ABOUT THIS BUILD</Text><Text style={S.muted}>Search for a course to load mapped hole features. OpenStreetMap detail varies by course. GPS distance uses a mapped green pin when available or a pin you save yourself. Course features are saved on this phone.</Text></View>}
       {gpsError?<Text style={S.error}>{gpsError}</Text>:null}<Text style={S.footer}>Plays-like and club suggestions are estimates. Check your own carry numbers and course conditions.</Text>
     </ScrollView>
     <View style={S.bottom}><Text style={S.bottomText}>ONE HOLE AT A TIME</Text><Text style={[S.bottomText,{color:GOLD,marginTop:3}]}>{distanceM==null?"SAVE GREEN PIN FOR GPS DISTANCE":"LIVE GPS DISTANCE ACTIVE"}</Text></View>
@@ -129,7 +149,7 @@ export default function App() {
 
 const S=StyleSheet.create({
   screen:{flex:1,backgroundColor:GREEN},header:{paddingTop:10,paddingHorizontal:16,paddingBottom:12,flexDirection:"row",alignItems:"center",justifyContent:"space-between"},brand:{color:WHITE,fontSize:18,fontWeight:"900",letterSpacing:1},brandSub:{color:MUTED,fontSize:9,letterSpacing:1.3,marginTop:3,fontWeight:"700"},gpsPill:{flexDirection:"row",alignItems:"center",borderColor:"#526158",borderWidth:1,borderRadius:18,paddingVertical:7,paddingHorizontal:10},dot:{width:7,height:7,borderRadius:4,backgroundColor:"#777"},gpsText:{color:WHITE,fontSize:10,fontWeight:"800",marginLeft:6},
-  tabs:{flexDirection:"row",borderTopWidth:1,borderBottomWidth:1,borderColor:"#315044",backgroundColor:"#10271E"},tab:{flex:1,paddingVertical:12,alignItems:"center"},tabActive:{borderBottomWidth:2,borderColor:GOLD},tabText:{color:MUTED,fontSize:10,fontWeight:"800"},content:{padding:13,paddingBottom:18},courseRow:{flexDirection:"row",alignItems:"flex-end",gap:9,backgroundColor:PANEL,padding:11,borderRadius:14,marginBottom:10,borderWidth:1,borderColor:"#2A493B"},goldLabel:{color:GOLD,fontSize:10,fontWeight:"900",letterSpacing:1},courseInput:{color:WHITE,fontSize:17,fontWeight:"800",paddingVertical:5},holeNav:{flexDirection:"row",alignItems:"center",justifyContent:"space-between",marginBottom:9},holeTitle:{color:WHITE,fontSize:17,fontWeight:"900",letterSpacing:1},
+  tabs:{flexDirection:"row",borderTopWidth:1,borderBottomWidth:1,borderColor:"#315044",backgroundColor:"#10271E"},tab:{flex:1,paddingVertical:12,alignItems:"center"},tabActive:{borderBottomWidth:2,borderColor:GOLD},tabText:{color:MUTED,fontSize:10,fontWeight:"800"},content:{padding:13,paddingBottom:18},courseRow:{flexDirection:"row",alignItems:"flex-end",gap:9,backgroundColor:PANEL,padding:11,borderRadius:14,marginBottom:7,borderWidth:1,borderColor:"#2A493B"},courseResult:{padding:9,backgroundColor:"#203C30",borderRadius:9,marginTop:5,borderWidth:1,borderColor:"#496150"},courseResultName:{color:WHITE,fontSize:12,fontWeight:"800"},courseResultSub:{color:MUTED,fontSize:9,marginTop:3},courseStatus:{color:MUTED,fontSize:9,lineHeight:13,marginBottom:8},goldLabel:{color:GOLD,fontSize:10,fontWeight:"900",letterSpacing:1},courseInput:{color:WHITE,fontSize:17,fontWeight:"800",paddingVertical:5},holeNav:{flexDirection:"row",alignItems:"center",justifyContent:"space-between",marginBottom:9},holeTitle:{color:WHITE,fontSize:17,fontWeight:"900",letterSpacing:1},
   btn:{minHeight:41,paddingHorizontal:12,paddingVertical:9,borderRadius:10,backgroundColor:"#203C30",borderWidth:1,borderColor:"#496150",alignItems:"center",justifyContent:"center"},btnSmall:{minHeight:34,paddingHorizontal:9,paddingVertical:6},btnGold:{backgroundColor:GOLD,borderColor:GOLD},btnText:{color:WHITE,fontSize:10,fontWeight:"900",letterSpacing:.4},muted:{color:MUTED,fontSize:11,lineHeight:16},label:{color:MUTED,fontSize:9,fontWeight:"800",letterSpacing:.5,marginBottom:4},input:{color:WHITE,fontSize:15,borderBottomWidth:1,borderColor:"#526B59",paddingVertical:6},
   choiceRow:{flexDirection:"row",flexWrap:"wrap",gap:6,marginVertical:6},choice:{borderRadius:8,borderWidth:1,borderColor:"#526B59",paddingHorizontal:9,paddingVertical:8,backgroundColor:"#10251B"},choiceOn:{backgroundColor:"#594C26",borderColor:GOLD},choiceText:{color:MUTED,fontSize:9,fontWeight:"900"},holeCard:{backgroundColor:PANEL,borderRadius:15,borderWidth:1,borderColor:"#385541",overflow:"hidden",marginBottom:9},holeHead:{flexDirection:"row",justifyContent:"space-between",alignItems:"center",paddingHorizontal:12,paddingVertical:9},whiteSmall:{color:WHITE,fontSize:10,fontWeight:"700"},
   art:{height:218,backgroundColor:"#143525",overflow:"hidden",alignItems:"center"},fairwayWide:{position:"absolute",top:-12,width:140,height:250,borderRadius:72,backgroundColor:"#739459"},fairwayNarrow:{position:"absolute",top:0,width:98,height:240,borderRadius:55,backgroundColor:"#86A964"},greenShape:{position:"absolute",width:112,height:58,borderRadius:36,backgroundColor:"#A5BD70",borderWidth:2,borderColor:"#D5D991"},flagPole:{position:"absolute",width:2,height:24,backgroundColor:WHITE},flag:{position:"absolute",width:13,height:8,marginLeft:3,backgroundColor:"#C55A4A"},bunkerL:{position:"absolute",top:110,marginLeft:-80,width:32,height:16,backgroundColor:"#D7C79B",borderRadius:18,transform:[{rotate:"-18deg"}]},bunkerR:{position:"absolute",top:150,marginLeft:59,width:30,height:15,backgroundColor:"#D7C79B",borderRadius:18},water:{position:"absolute",bottom:35,marginLeft:79,width:44,height:18,borderRadius:18,backgroundColor:"#315E6A"},tee:{position:"absolute",bottom:27,width:12,height:12,borderRadius:6,backgroundColor:GOLD,borderWidth:2,borderColor:WHITE},artGreenLabel:{position:"absolute",color:"#18301F",fontSize:9,fontWeight:"900"},teeLabel:{position:"absolute",bottom:8,color:WHITE,fontSize:9,fontWeight:"900"},artNote:{position:"absolute",bottom:4,left:6,color:"#D5E2D5",fontSize:7,letterSpacing:.3},

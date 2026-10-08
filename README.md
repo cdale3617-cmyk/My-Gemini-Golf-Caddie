@@ -5,6 +5,7 @@ A standalone Expo and React Native golf-caddie app. It keeps one hole in view at
 ## Included
 
 - GPS distance from the phone to a green pin saved for each hole.
+- Course search and OpenStreetMap hole features, shown one numbered hole at a time when available.
 - Spoken caddie commands and spoken distance and club suggestions.
 - Plays-like estimate from distance, wind, elevation, and shot profile.
 - Editable club carries and lofts.
@@ -15,7 +16,7 @@ A standalone Expo and React Native golf-caddie app. It keeps one hole in view at
 
 ## Current limits
 
-This first build does not contain surveyed course maps, automatic course discovery, live weather, or Gemini API access. The hole picture is an illustration, not geographic data. Save a green pin yourself to use GPS distance. Starting club carries are examples; replace them with your own. Plays-like values are estimates.
+Course search uses OpenStreetMap's Nominatim service, and hole shapes use OpenStreetMap's Overpass service. Course detail varies; some courses or holes have no mapped geometry. For those holes, stand by the green, start GPS, and save the green pin manually. Saved course features and round data stay on the phone. OpenStreetMap data is © OpenStreetMap contributors and licensed under ODbL; attribution is shown in the app. Starting club carries are examples; replace them with your own. Plays-like values are estimates.
 
 Voice recognition uses the speech service installed on the phone. On Android, install or enable Speech Recognition & Synthesis if voice does not start. Voice needs the built APK; it does not work in Expo Go.
 
