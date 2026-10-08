@@ -39,13 +39,13 @@ jobs:
         run: npx expo-doctor
       - name: Generate Android project
         run: npx expo prebuild --platform android --clean
-      - name: Build installable debug APK
+      - name: Build standalone release APK
         working-directory: android
-        run: ./gradlew assembleDebug --no-daemon
+        run: ./gradlew assembleRelease --no-daemon
       - name: Save APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: My-Gemini-Golf-Caddie-APK
-          path: android/app/build/outputs/apk/debug/app-debug.apk
+          path: android/app/build/outputs/apk/release/app-release.apk
           if-no-files-found: error
           retention-days: 14
