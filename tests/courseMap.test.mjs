@@ -32,6 +32,21 @@ test("mapped pin is linked to its numbered hole and one-hole view excludes other
   assert.equal(featuresForHole(mappedHole,1).length,2);
 });
 
+test("unnumbered neighboring greens and hazards stay out of the selected hole", () => {
+  const elements = [
+    {type:"way",id:10,tags:{golf:"hole",ref:"1"},geometry:[{lat:-23.1,lon:150.7},{lat:-23.1015,lon:150.7},{lat:-23.103,lon:150.7}]},
+    {type:"way",id:11,tags:{golf:"green"},geometry:[{lat:-23.10298,lon:150.7},{lat:-23.10302,lon:150.70004},{lat:-23.103,lon:150.70002},{lat:-23.10298,lon:150.7}]},
+    {type:"way",id:12,tags:{golf:"hole",ref:"2"},geometry:[{lat:-23.1,lon:150.701},{lat:-23.103,lon:150.701}]},
+    {type:"way",id:13,tags:{golf:"green"},geometry:[{lat:-23.10298,lon:150.701},{lat:-23.10302,lon:150.70104},{lat:-23.103,lon:150.70102},{lat:-23.10298,lon:150.701}]},
+    {type:"way",id:14,tags:{golf:"green"},geometry:[{lat:-23.10148,lon:150.7},{lat:-23.10152,lon:150.70004},{lat:-23.1015,lon:150.70002},{lat:-23.10148,lon:150.7}]},
+    {type:"way",id:15,tags:{golf:"bunker"},geometry:[{lat:-23.10149,lon:150.70013},{lat:-23.10151,lon:150.70017},{lat:-23.10149,lon:150.70013}]},
+    {type:"way",id:16,tags:{golf:"bunker"},geometry:[{lat:-23.10149,lon:150.70093},{lat:-23.10151,lon:150.70097},{lat:-23.10149,lon:150.70093}]},
+    {type:"way",id:17,tags:{golf:"fairway"},geometry:[{lat:-23.099,lon:150.699},{lat:-23.104,lon:150.699},{lat:-23.104,lon:150.702},{lat:-23.099,lon:150.702},{lat:-23.099,lon:150.699}]},
+  ];
+  const selected = featuresForHole(elements,1);
+  assert.deepEqual(selected.map(feature=>feature.id).sort((a,b)=>a-b),[10,11,15]);
+});
+
 test("selected hole geometry projects into a drawable viewport", () => {
   const projected=projectHoleFeatures(featuresForHole(mappedHole,1));
   assert.equal(projected.shapes.length,2);
