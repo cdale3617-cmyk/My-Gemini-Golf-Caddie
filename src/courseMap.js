@@ -80,6 +80,30 @@ function distance(a, b) {
   return 12742000 * Math.asin(Math.sqrt(Math.min(1, h)));
 }
 
+function distanceToRoute(point, route) {
+  if (!point || !route?.length) return Infinity;
+  const origin = route[0];
+  const latScale = 111132;
+  const lonScale = 111320 * Math.cos((origin.latitude * Math.PI) / 180);
+  const xy = (p) => ({ x: (p.longitude - origin.longitude) * lonScale, y: (p.latitude - origin.latitude) * latScale });
+  const p = xy(point);
+  if (route.length === 1) {
+    const a = xy(route[0]);
+    return Math.hypot(p.x - a.x, p.y - a.y);
+  }
+  let closest = Infinity;
+  for (let i = 1; i < route.length; i += 1) {
+    const a = xy(route[i - 1]);
+    const b = xy(route[i]);
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const lengthSquared = dx * dx + dy * dy;
+    const t = lengthSquared ? Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / lengthSquared)) : 0;
+    closest = Math.min(closest, Math.hypot(p.x - (a.x + t * dx), p.y - (a.y + t * dy)));
+  }
+  return closest;
+}
+
 export function greenPinsByHole(elements) {
   const features = Array.isArray(elements) ? elements : [];
   const holeLines = features.filter((feature) => feature?.tags?.golf === "hole" && coordinatesOf(feature).length > 1);
@@ -106,20 +130,45 @@ export function featuresForHole(elements, number) {
     const type = feature?.tags?.golf;
     return SUPPORTED.has(type) && coordinatesOf(feature).length;
   });
-  const explicitHole = features.find((feature) => feature.tags.golf === "hole" && holeReference(feature) === number);
-  const explicitGreen = features.find((feature) => feature.tags.golf === "green" && holeReference(feature) === number);
-  const anchor = explicitHole ? featureCenter(explicitHole) : explicitGreen ? featureCenter(explicitGreen) : null;
-  if (!anchor) return [];
+  const selectedHole = features.find((feature) => feature.tags.golf === "hole" && holeReference(feature) === number);
+  const explicitlyMatchedGreen = features.find((feature) => feature.tags.golf === "green" && holeReference(feature) === number);
+  const anchorFeature = selectedHole || explicitlyMatchedGreen;
+  if (!anchorFeature) return [];
 
-  const line = coordinatesOf(explicitHole || explicitGreen);
-  const start = line[0] || anchor;
-  const end = line[line.length - 1] || anchor;
+  const route = coordinatesOf(anchorFeature);
+  const start = route[0];
+  const finish = route[route.length - 1];
+  const endpointDistance = (feature) => {
+    const center = featureCenter(feature);
+    return Math.min(distance(center, start), distance(center, finish));
+  };
+  const selectedGreen = explicitlyMatchedGreen || (selectedHole
+    ? features
+      .filter((feature) => feature.tags.golf === "green" && holeReference(feature) == null)
+      .map((feature) => ({ feature, distance: endpointDistance(feature) }))
+      .filter((item) => item.distance <= 120)
+      .sort((a, b) => a.distance - b.distance)[0]?.feature
+    : null);
+  const targetGreen = selectedGreen ? featureCenter(selectedGreen) : finish;
+
   return features.filter((feature) => {
+    if (feature === selectedHole || feature === selectedGreen) return true;
     const ref = holeReference(feature);
     if (ref != null) return ref === number;
+    const type = feature.tags.golf;
+    if (type === "hole" || type === "green") return false;
+
     const center = featureCenter(feature);
-    const nearTarget = Math.min(distance(center, anchor), distance(center, start), distance(center, end)) < 150;
-    return nearTarget && feature.tags.golf !== "hole";
+    if (!center) return false;
+    if (type === "pin") return distance(center, targetGreen) <= 18;
+    if (type === "tee") return distance(center, start) <= 45;
+
+    const points = coordinatesOf(feature);
+    const routeDistance = distanceToRoute(center, route);
+    if (routeDistance > 45) return false;
+    // Keep only features whose full outline follows this hole's corridor.
+    // This drops broad/shared course areas that make neighboring holes appear.
+    return points.every((point) => distanceToRoute(point, route) <= 70);
   });
 }
 
