@@ -1,0 +1,24 @@
+{
+  "expo": {
+    "name": "My Gemini Golf Caddie",
+    "slug": "my-gemini-golf-caddie",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "newArchEnabled": true,
+    "android": {
+      "package": "com.dalecopeland.mygeminigolfcaddie",
+      "versionCode": 1,
+      "permissions": ["ACCESS_COARSE_LOCATION", "ACCESS_FINE_LOCATION", "RECORD_AUDIO"]
+    },
+    "ios": { "bundleIdentifier": "com.dalecopeland.mygeminigolfcaddie", "supportsTablet": true },
+    "plugins": [
+      ["expo-location", { "locationWhenInUsePermission": "My Gemini Golf Caddie uses your location to measure distance to your saved green pin." }],
+      ["expo-speech-recognition", {
+        "microphonePermission": "My Gemini Golf Caddie uses the microphone when you tap Voice Caddie.",
+        "speechRecognitionPermission": "My Gemini Golf Caddie converts your spoken caddie commands to text.",
+        "androidSpeechServicePackages": ["com.google.android.googlequicksearchbox", "com.google.android.tts"]
+      }]
+    ]
+  }
+}
