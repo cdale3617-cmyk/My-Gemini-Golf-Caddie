@@ -1,7 +1,7 @@
 const SUPPORTED = new Set(["hole", "green", "tee", "fairway", "bunker", "water_hazard", "pin"]);
 const OVERPASS_ENDPOINTS = [
-  "https://overpass-api.de/api/interpreter",
   "https://overpass.private.coffee/api/interpreter",
+  "https://overpass-api.de/api/interpreter",
   "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
 ];
 
@@ -9,13 +9,14 @@ export async function fetchCourseFeatures(query, fetchImpl = fetch) {
   let lastError;
   for (const endpoint of OVERPASS_ENDPOINTS) {
     const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 30000);
+        const timeout = setTimeout(() => controller.abort(), 55000);
     try {
       const response = await fetchImpl(endpoint, {
         method: "POST",
         headers: {
           "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
           Accept: "application/json",
+          "User-Agent": "MyGeminiGolfCaddie/1.0 (+https://github.com/cdale3617-cmyk/My-Gemini-Golf-Caddie)",
         },
         body: "data=" + encodeURIComponent(query),
         signal: controller.signal,
@@ -37,7 +38,7 @@ export function osmCourseQuery(latitude, longitude) {
   const lat = Number(latitude);
   const lon = Number(longitude);
   if (!Number.isFinite(lat) || !Number.isFinite(lon)) throw new Error("Course coordinates are invalid.");
-  return `[out:json][timeout:25];nwr(around:2200,${lat},${lon})["golf"~"^(hole|green|tee|fairway|bunker|water_hazard|pin)$"];out geom;`;
+  return `[out:json][timeout:45];nwr(around:2200,${lat},${lon})["golf"~"^(hole|green|tee|fairway|bunker|water_hazard|pin)$"];out geom;`;
 }
 
 export function coordinatesOf(feature) {
