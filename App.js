@@ -10,6 +10,11 @@ import { calculatePlaysLike, displayToMetres, haversineMetres, makeDefaultBag, m
 import HoleMap from "./src/HoleMap.js";
 import { featuresForHole, fetchCourseFeatures, greenPinsByHole, osmCourseQuery } from "./src/courseMap.js";
 
+function applyKnownCoursePars(round){
+  if(!round||!Array.isArray(round.holes)||!/(capricorn.*resort|resort.*capricorn)/i.test(round.courseName||""))return round;
+  return {...round,holes:round.holes.map(h=>h.number===1?{...h,par:5}:h)};
+}
+
 const KEY="gemini-golf-caddie-v1", GOLD="#D9B45B", GREEN="#0D241B", PANEL="#142D23", MUTED="#AAB5AC", WHITE="#F5F4EC";
 
 function Btn({label,onPress,primary=false,small=false}) {
@@ -32,7 +37,7 @@ export default function App() {
   const gpsWatch=useRef(null), hole=round.holes[holeIndex], unit=settings.distanceUnit;
 
   useEffect(()=>{
-    (async()=>{try{const raw=await AsyncStorage.getItem(KEY);if(raw){const d=JSON.parse(raw);if(d.round?.holes?.length===18)setRound(d.round);if(d.bag?.length)setBag(d.bag);if(d.settings)setSettings(s=>({...s,...d.settings}));if(Array.isArray(d.courseFeatures)){setCourseFeatures(d.courseFeatures);if(d.courseFeatures.length)setCourseStatus("Saved OpenStreetMap course features loaded from this phone.");}}}catch{setGpsError("Saved round could not be read. A fresh round is ready.");}finally{setLoaded(true);}})();
+    (async()=>{try{const raw=await AsyncStorage.getItem(KEY);if(raw){const d=JSON.parse(raw);if(d.round?.holes?.length===18)setRound(applyKnownCoursePars(d.round));if(d.bag?.length)setBag(d.bag);if(d.settings)setSettings(s=>({...s,...d.settings}));if(Array.isArray(d.courseFeatures)){setCourseFeatures(d.courseFeatures);if(d.courseFeatures.length)setCourseStatus("Saved OpenStreetMap course features loaded from this phone.");}}}catch{setGpsError("Saved round could not be read. A fresh round is ready.");}finally{setLoaded(true);}})();
     return ()=>{gpsWatch.current?.remove();try{ExpoSpeechRecognitionModule.abort();}catch{}};
   },[]);
   useEffect(()=>{if(loaded)AsyncStorage.setItem(KEY,JSON.stringify({round,bag,settings,courseFeatures})).catch(()=>setGpsError("Could not save this change on the device."));},[round,bag,settings,courseFeatures,loaded]);
@@ -60,7 +65,7 @@ export default function App() {
       const query=osmCourseQuery(lat,lon);
       const elements=await fetchCourseFeatures(query);setCourseFeatures(elements);
       const pins=greenPinsByHole(elements);
-      setRound(r=>({...r,courseName:result.name,holes:r.holes.map(h=>pins[h.number]?{...h,pin:pins[h.number]}:h)}));
+      setRound(r=>applyKnownCoursePars({...r,courseName:result.name,holes:r.holes.map(h=>pins[h.number]?{...h,pin:pins[h.number]}:h)}));
       setCourseStatus(elements.length?"Course features loaded from OpenStreetMap.":"No detailed holes are mapped here yet. You can still save a green pin with GPS.");
     }catch(e){setCourseFeatures([]);setCourseStatus("Course map services are temporarily unavailable. GPS distance and green pin still work.");}
     finally{setCourseBusy(false);}
