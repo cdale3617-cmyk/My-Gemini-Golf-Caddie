@@ -1,4 +1,37 @@
 const SUPPORTED = new Set(["hole", "green", "tee", "fairway", "bunker", "water_hazard", "pin"]);
+const OVERPASS_ENDPOINTS = [
+  "https://overpass-api.de/api/interpreter",
+  "https://overpass.private.coffee/api/interpreter",
+  "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
+];
+
+export async function fetchCourseFeatures(query, fetchImpl = fetch) {
+  let lastError;
+  for (const endpoint of OVERPASS_ENDPOINTS) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15000);
+    try {
+      const response = await fetchImpl(endpoint, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+          Accept: "application/json",
+        },
+        body: "data=" + encodeURIComponent(query),
+        signal: controller.signal,
+      });
+      if (!response.ok) throw new Error("Overpass returned " + response.status);
+      const data = await response.json();
+      if (!Array.isArray(data.elements)) throw new Error("Invalid Overpass response");
+      return data.elements;
+    } catch (error) {
+      lastError = error;
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+  throw lastError || new Error("All Overpass instances failed");
+}
 
 export function osmCourseQuery(latitude, longitude) {
   const lat = Number(latitude);

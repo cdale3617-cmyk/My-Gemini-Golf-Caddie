@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { featuresForHole, greenPinsByHole, osmCourseQuery, projectHoleFeatures } from "../src/courseMap.js";
+import { featuresForHole, fetchCourseFeatures, greenPinsByHole, osmCourseQuery, projectHoleFeatures } from "../src/courseMap.js";
 
 const mappedHole = [
   {type:"way",id:1,tags:{golf:"hole",ref:"1"},geometry:[{lat:-23.1,lon:150.7},{lat:-23.101,lon:150.701}]},
@@ -11,6 +11,18 @@ const mappedHole = [
 test("course query is bounded and rejects invalid coordinates", () => {
   assert.match(osmCourseQuery(-23.1,150.7),/around:2200/);
   assert.throws(()=>osmCourseQuery("bad",150.7),/invalid/i);
+});
+
+test("course lookup falls back when an Overpass instance fails", async () => {
+  const calls = [];
+  const elements = [{ type: "node", id: 9, tags: { golf: "green" } }];
+  const result = await fetchCourseFeatures("[out:json];", async (url) => {
+    calls.push(url);
+    if (calls.length === 1) throw new Error("server unavailable");
+    return { ok: true, json: async () => ({ elements }) };
+  });
+  assert.equal(calls.length, 2);
+  assert.deepEqual(result, elements);
 });
 
 test("mapped pin is linked to its numbered hole and one-hole view excludes other holes", () => {
