@@ -8,7 +8,7 @@ import { ExpoSpeechRecognitionModule, useSpeechRecognitionEvent } from "expo-spe
 import { StatusBar as ExpoStatusBar } from "expo-status-bar";
 import { calculatePlaysLike, displayToMetres, haversineMetres, makeDefaultBag, makeDefaultRound, metresToDisplay, recommendClub } from "./src/caddieEngine.js";
 import HoleMap from "./src/HoleMap.js";
-import { featuresForHole, greenPinsByHole, osmCourseQuery } from "./src/courseMap.js";
+import { featuresForHole, fetchCourseFeatures, greenPinsByHole, osmCourseQuery } from "./src/courseMap.js";
 
 const KEY="gemini-golf-caddie-v1", GOLD="#D9B45B", GREEN="#0D241B", PANEL="#142D23", MUTED="#AAB5AC", WHITE="#F5F4EC";
 
@@ -58,13 +58,11 @@ export default function App() {
     setCourseBusy(true);setCourseStatus("Loading mapped holes…");
     try{
       const query=osmCourseQuery(lat,lon);
-      const response=await fetch("https://overpass-api.de/api/interpreter",{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded; charset=UTF-8","Accept":"application/json"},body:"data="+encodeURIComponent(query)});
-      if(!response.ok)throw new Error("Course map service returned "+response.status);
-      const data=await response.json();const elements=Array.isArray(data.elements)?data.elements:[];setCourseFeatures(elements);
+      const elements=await fetchCourseFeatures(query);setCourseFeatures(elements);
       const pins=greenPinsByHole(elements);
       setRound(r=>({...r,courseName:result.name,holes:r.holes.map(h=>pins[h.number]?{...h,pin:pins[h.number]}:h)}));
       setCourseStatus(elements.length?"Course features loaded from OpenStreetMap.":"No detailed holes are mapped here yet. You can still save a green pin with GPS.");
-    }catch(e){setCourseFeatures([]);setCourseStatus("Could not load course features. Check internet and try again.");}
+    }catch(e){setCourseFeatures([]);setCourseStatus("Course map services are temporarily unavailable. GPS distance and green pin still work.");}
     finally{setCourseBusy(false);}
   }
   async function searchCourse(){
