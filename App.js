@@ -6,12 +6,13 @@ import {
   Platform,
   Pressable,
   ScrollView,
-  StatusBar,
   StyleSheet,
   Text,
   TextInput,
-  View
+  View,
+  useWindowDimensions
 } from "react-native";
+import { SafeAreaProvider, SafeAreaView, initialWindowMetrics } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Location from "expo-location";
 import * as Speech from "expo-speech";
@@ -29,12 +30,9 @@ import {
   startVoiceRecognition
 } from "./src/appFeatures.js";
 import appConfig from "./app.json";
+import { theme, antiGlareTheme, layoutForDevice } from "./src/theme.js";
 
-const GREEN = "#0D241B";
-const PANEL = "#142D23";
-const GOLD = "#D9B45B";
-const WHITE = "#F5F4EC";
-const MUTED = "#AAB5AC";
+const AppThemeContext = React.createContext(null);
 const STORE = "gemini-golf-caddie-v3";
 
 const START_BAG = [
@@ -183,6 +181,7 @@ function getTees(c) {
 }
 
 function Button({ title, onPress, primary, disabled }) {
+  const { palette, styles } = React.useContext(AppThemeContext);
   return (
     <Pressable
       onPress={onPress}
@@ -197,7 +196,7 @@ function Button({ title, onPress, primary, disabled }) {
     >
       <Text style={[
         styles.buttonText,
-        primary && { color: GREEN }
+        primary && { color: palette.background }
       ]}>
         {title}
       </Text>
@@ -213,6 +212,7 @@ function Field({
   numeric,
   secret
 }) {
+  const { palette, styles } = React.useContext(AppThemeContext);
   return (
     <View style={{ flex: 1, marginVertical: 5 }}>
       <Text style={styles.small}>{title}</Text>
@@ -221,7 +221,7 @@ function Field({
         value={String(value ?? "")}
         onChangeText={onChange}
         placeholder={placeholder}
-        placeholderTextColor="#819287"
+        placeholderTextColor={palette.muted}
         keyboardType={numeric ? "decimal-pad" : "default"}
         secureTextEntry={secret}
         autoCorrect={false}
@@ -232,17 +232,21 @@ function Field({
 }
 
 function Options({ items, value, onChange }) {
+  const { palette, styles } = React.useContext(AppThemeContext);
   return (
     <View style={styles.row}>
       {items.map(([label, id]) => (
         <Pressable
           key={id}
           onPress={() => onChange(id)}
+          accessibilityRole="radio"
+          accessibilityLabel={label}
+          accessibilityState={{ selected: value === id }}
           style={[
             styles.option,
             value === id && {
-              borderColor: GOLD,
-              backgroundColor: "#544524"
+              borderColor: palette.gold,
+              backgroundColor: palette.selected
             }
           ]}
         >
@@ -254,6 +258,17 @@ function Options({ items, value, onChange }) {
 }
 
 export default function App() {
+  return <SafeAreaProvider initialMetrics={initialWindowMetrics}><CaddieApp /></SafeAreaProvider>;
+}
+
+function CaddieApp() {
+  const { width, fontScale } = useWindowDimensions();
+  const deviceLayout = layoutForDevice(width, fontScale);
+  const [antiGlare, setAntiGlare] = useState(false);
+  const palette = antiGlare ? antiGlareTheme : theme;
+  const styles = React.useMemo(() => createStyles(palette), [palette]);
+  const GOLD = palette.gold;
+  const themeValue = React.useMemo(() => ({ palette, styles }), [palette, styles]);
   const [tab, setTab] = useState("Caddie");
   const [round, setRound] = useState(newRound);
   const [bag, setBag] = useState(START_BAG);
@@ -307,6 +322,7 @@ export default function App() {
           if (typeof d.tournament === "boolean") {
             setTournament(d.tournament);
           }
+          if (typeof d.antiGlare === "boolean") setAntiGlare(d.antiGlare);
           if (Array.isArray(d.courseFeatures)) {
             setCourseFeatures(d.courseFeatures);
             setMapStatus(d.courseFeatures.length
@@ -345,10 +361,11 @@ export default function App() {
         unit,
         windUnit,
         tournament,
+        antiGlare,
         courseFeatures
       })
     ).catch(console.warn);
-  }, [loaded, round, bag, unit, windUnit, tournament, courseFeatures]);
+  }, [loaded, round, bag, unit, windUnit, tournament, antiGlare, courseFeatures]);
 
   function displayDistance(m) {
     if (m == null || !Number.isFinite(Number(m))) {
@@ -754,28 +771,45 @@ export default function App() {
   );
 
   return (
-    <KeyboardAvoidingView
+    <AppThemeContext.Provider value={themeValue}>
+    <SafeAreaView
       style={styles.screen}
+      edges={["top", "bottom", "left", "right"]}
+      testID="safe-screen"
+    >
+    <KeyboardAvoidingView
+      style={{ flex: 1 }}
       behavior={
         Platform.OS === "ios" ? "padding" : undefined
       }
     >
       <ExpoStatusBar style="light" />
-      <StatusBar
-        backgroundColor={GREEN}
-        barStyle="light-content"
-      />
 
       <View style={styles.header}>
-        <Text style={styles.brand}>
-          GEMINI <Text style={{ color: GOLD }}>GOLF CADDIE</Text>
+        <Text
+          style={styles.brand}
+          numberOfLines={2}
+          adjustsFontSizeToFit
+          minimumFontScale={0.75}
+          maxFontSizeMultiplier={1.3}
+          testID="app-brand"
+        >
+          DRC GEMINI{"\n"}<Text style={{ color: GOLD }}>GOLF CADDIE</Text>
         </Text>
-        <Text style={styles.small}>
-          {gpsOn ? "GPS ON" : "GPS OFF"}
-        </Text>
+        <View style={styles.gpsBadge}>
+          <Text style={styles.gpsText} numberOfLines={1} maxFontSizeMultiplier={1.3}>
+            {gpsOn ? "GPS ON" : "GPS OFF"}
+          </Text>
+        </View>
       </View>
 
-      <View style={styles.tabs}>
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        style={[styles.tabScroller, { height: deviceLayout.tabHeight }]}
+        contentContainerStyle={styles.tabs}
+        testID="app-tabs"
+      >
         {[
           "Caddie",
           "Courses",
@@ -786,15 +820,20 @@ export default function App() {
           <Pressable
             key={t}
             onPress={() => setTab(t)}
+            accessibilityRole="tab"
+            accessibilityLabel={t}
+            accessibilityState={{ selected: tab === t }}
             style={[
               styles.tab,
               tab === t && styles.activeTab
             ]}
           >
-            <Text style={styles.small}>{t}</Text>
+            <Text style={[styles.tabText, tab === t && { color: GOLD }]} numberOfLines={1}>
+              {t}
+            </Text>
           </Pressable>
         ))}
-      </View>
+      </ScrollView>
 
       <ScrollView
         style={{ flex: 1 }}
@@ -803,6 +842,7 @@ export default function App() {
           paddingBottom: 40
         }}
         keyboardShouldPersistTaps="handled"
+        testID="main-content"
       >
         {tab === "Caddie" && (
           <>
@@ -843,8 +883,8 @@ export default function App() {
               <HoleMap
                 features={featuresForHole(courseFeatures, hole.number)}
                 status={mapStatus}
+                palette={palette}
               />
-              <Text style={styles.small}>{mapStatus}</Text>
               <Button
                 title={mapBusy ? "LOADING MAP..." : "LOAD / RETRY MAP"}
                 onPress={() => loadCourseMap(round)}
@@ -874,21 +914,21 @@ export default function App() {
             </View>
 
             <View style={styles.row}>
-              <View style={styles.metric}>
+              <View style={[styles.metric, { flexBasis: deviceLayout.metricBasis }]}>
                 <Text style={styles.small}>TO GREEN</Text>
                 <Text style={styles.number}>
                   {displayDistance(distance)}
                 </Text>
                 <Text style={styles.small}>{unit}</Text>
               </View>
-              <View style={styles.metric}>
+              <View style={[styles.metric, { flexBasis: deviceLayout.metricBasis }]}>
                 <Text style={styles.small}>PLAYS LIKE</Text>
                 <Text style={styles.number}>
                   {tournament ? "—" : displayDistance(playsLike)}
                 </Text>
                 <Text style={styles.small}>{unit}</Text>
               </View>
-              <View style={styles.metric}>
+              <View style={[styles.metric, { flexBasis: deviceLayout.metricBasis }]}>
                 <Text style={styles.small}>CLUB</Text>
                 <Text style={styles.number}>
                   {club?.name || "—"}
@@ -1146,6 +1186,20 @@ export default function App() {
               ]}
             />
 
+            <Text style={styles.gold}>DISPLAY MODE</Text>
+            <Options
+              value={antiGlare ? "contrast" : "navy"}
+              onChange={value => setAntiGlare(value === "contrast")}
+              items={[
+                ["NAVY & GOLD", "navy"],
+                ["ANTI-GLARE", "contrast"]
+              ]}
+            />
+            <Text style={styles.small}>
+              Anti-glare uses solid black, bright text and strong outlines on every screen.
+              It improves display contrast but cannot remove reflections from the glass.
+            </Text>
+
             <Text style={styles.gold}>WIND UNIT</Text>
             <Options
               value={windUnit}
@@ -1186,33 +1240,73 @@ export default function App() {
         </Text>
       </ScrollView>
     </KeyboardAvoidingView>
+    </SafeAreaView>
+    </AppThemeContext.Provider>
   );
 }
 
-const styles = StyleSheet.create({
+function createStyles(palette) {
+  const BACKGROUND = palette.background;
+  const PANEL = palette.panel;
+  const GOLD = palette.gold;
+  const WHITE = palette.text;
+  const MUTED = palette.muted;
+  return StyleSheet.create({
   screen: {
     flex: 1,
-    backgroundColor: GREEN
+    backgroundColor: BACKGROUND
   },
   header: {
     padding: 15,
     flexDirection: "row",
     justifyContent: "space-between",
-    alignItems: "center"
+    alignItems: "center",
+    gap: 10
   },
   brand: {
     color: WHITE,
     fontSize: 16,
-    fontWeight: "900"
+    fontWeight: "900",
+    flex: 1,
+    minWidth: 0
+  },
+  gpsBadge: {
+    flexShrink: 0,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    borderRadius: 7,
+    borderWidth: 1,
+    borderColor: palette.border,
+    backgroundColor: palette.elevated
+  },
+  gpsText: {
+    color: MUTED,
+    fontSize: 10,
+    fontWeight: "700"
+  },
+  tabScroller: {
+    flexGrow: 0,
+    flexShrink: 0,
+    backgroundColor: palette.tabBar
   },
   tabs: {
     flexDirection: "row",
-    backgroundColor: "#10271E"
+    flexGrow: 1
   },
   tab: {
-    flex: 1,
-    paddingVertical: 13,
+    flexGrow: 1,
+    flexShrink: 0,
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    minHeight: 48,
+    justifyContent: "center",
     alignItems: "center"
+  },
+  tabText: {
+    color: MUTED,
+    fontSize: 11,
+    lineHeight: 16,
+    fontWeight: "700"
   },
   activeTab: {
     borderBottomWidth: 2,
@@ -1221,20 +1315,20 @@ const styles = StyleSheet.create({
   panel: {
     backgroundColor: PANEL,
     borderRadius: 12,
-    borderWidth: 1,
-    borderColor: "#385541",
+    borderWidth: palette.antiGlare ? 2 : 1,
+    borderColor: palette.border,
     padding: 12,
     marginVertical: 7
   },
   heading: {
     color: WHITE,
-    fontSize: 18,
+    fontSize: palette.antiGlare ? 19 : 18,
     fontWeight: "900",
     marginVertical: 7
   },
   gold: {
     color: GOLD,
-    fontSize: 12,
+    fontSize: palette.antiGlare ? 13 : 12,
     fontWeight: "900",
     marginVertical: 7
   },
@@ -1245,7 +1339,7 @@ const styles = StyleSheet.create({
   },
   small: {
     color: MUTED,
-    fontSize: 10,
+    fontSize: palette.antiGlare ? 11 : 10,
     lineHeight: 17
   },
   input: {
@@ -1253,26 +1347,32 @@ const styles = StyleSheet.create({
     fontSize: 15,
     paddingVertical: 8,
     borderBottomWidth: 1,
-    borderColor: "#526B59"
+    borderColor: palette.inputBorder
   },
   button: {
-    backgroundColor: "#203C30",
-    borderColor: "#496150",
-    borderWidth: 1,
+    backgroundColor: palette.elevated,
+    borderColor: palette.border,
+    borderWidth: palette.antiGlare ? 2 : 1,
     borderRadius: 9,
     padding: 11,
+    minHeight: 48,
+    maxWidth: "100%",
     margin: 3,
     alignItems: "center",
     justifyContent: "center"
   },
   primary: {
     backgroundColor: GOLD,
-    borderColor: GOLD
+    borderColor: GOLD,
+    borderTopColor: palette.goldHigh,
+    borderBottomColor: palette.goldLow
   },
   buttonText: {
     color: WHITE,
-    fontSize: 10,
-    fontWeight: "900"
+    fontSize: palette.antiGlare ? 11 : 10,
+    fontWeight: "900",
+    alignSelf: "stretch",
+    textAlign: "center"
   },
   row: {
     flexDirection: "row",
@@ -1283,21 +1383,26 @@ const styles = StyleSheet.create({
   },
   rowBetween: {
     flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
     alignItems: "center",
     justifyContent: "space-between",
     marginVertical: 10
   },
   option: {
-    borderWidth: 1,
-    borderColor: "#526B59",
+    borderWidth: palette.antiGlare ? 2 : 1,
+    borderColor: palette.inputBorder,
     borderRadius: 8,
-    padding: 10
+    padding: 10,
+    minHeight: 48,
+    maxWidth: "100%"
   },
   metric: {
-    flex: 1,
+    flexGrow: 1,
+    flexShrink: 0,
     alignItems: "center",
-    backgroundColor: "#091A13",
-    borderWidth: 1,
+    backgroundColor: palette.metric,
+    borderWidth: palette.antiGlare ? 2 : 1,
     borderColor: GOLD,
     borderRadius: 9,
     padding: 8
@@ -1305,20 +1410,24 @@ const styles = StyleSheet.create({
   number: {
     color: GOLD,
     fontSize: 19,
-    fontWeight: "900"
+    fontWeight: "900",
+    textAlign: "center"
   },
   clubRow: {
     flexDirection: "row",
     alignItems: "center",
     gap: 7,
     borderBottomWidth: 1,
-    borderColor: "#304739"
+    borderColor: palette.border
   },
   scoreRow: {
     flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
     justifyContent: "space-between",
     padding: 12,
     borderBottomWidth: 1,
-    borderColor: "#304739"
+    borderColor: palette.border
   }
 });
+}

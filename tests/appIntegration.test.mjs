@@ -71,8 +71,13 @@ async function harness(t, options = {}) {
       ...Object.fromEntries(["KeyboardAvoidingView", "Pressable", "ScrollView", "StatusBar",
         "Text", "TextInput", "View"].map(name => [name, name])),
       StyleSheet: { create: value => value },
+      useWindowDimensions: () => ({ width: options.width || 393, height: 852, fontScale: options.fontScale || 1 }),
       Platform: { OS: "android" },
       Alert: { alert: (...args) => alerts.push(args) }
+    },
+    "react-native-safe-area-context": {
+      SafeAreaProvider: ({ children }) => React.createElement(React.Fragment, null, children),
+      SafeAreaView: "SafeAreaView"
     },
     "@react-native-async-storage/async-storage": {
       getItem: async () => options.savedRound ? JSON.stringify(options.savedRound) : null,
@@ -108,7 +113,9 @@ async function harness(t, options = {}) {
     if (filename.endsWith(".json")) return JSON.parse(fs.readFileSync(filename, "utf8"));
     const module = { exports: {} };
     moduleCache.set(filename, module);
-    const code = transformSync(fs.readFileSync(filename, "utf8"), {
+    const sourcePath = filename === path.join(rootDir, "App.js") && process.env.APP_SOURCE_OVERRIDE
+      ? path.resolve(rootDir, process.env.APP_SOURCE_OVERRIDE) : filename;
+    const code = transformSync(fs.readFileSync(sourcePath, "utf8"), {
       filename, babelrc: false, configFile: false, plugins: [jsx, commonjs]
     }).code;
     const localRequire = name => {
@@ -120,7 +127,7 @@ async function harness(t, options = {}) {
       { filename })(module.exports, localRequire, module, mockFetch);
     return module.exports;
   }
-  const entry = path.resolve(rootDir, process.env.APP_SOURCE_OVERRIDE || "App.js");
+  const entry = path.join(rootDir, "App.js");
   const App = load(entry).default;
   let renderer;
   const flush = () => new Promise(resolve => setImmediate(resolve));
@@ -332,4 +339,87 @@ test("canceling while the microphone permission prompt is open prevents delayed 
   });
   assert.equal(app.recognitionCalls.filter(call => call.type === "start").length, 0);
   assert.match(app.allText(), /Voice is off/);
+});
+
+test("S24 layout reserves all system edges and keeps top navigation labels on one line", async t => {
+  const app = await harness(t, { width: 393, fontScale: 2 });
+  const safe = app.renderer.root.findByType("SafeAreaView");
+  assert.deepEqual(safe.props.edges, ["top", "bottom", "left", "right"]);
+  const tabs = app.renderer.root.findAllByType("ScrollView").find(node => node.props.testID === "app-tabs");
+  assert.equal(tabs.props.horizontal, true);
+  const tabLabels = tabs.findAllByType("Text");
+  assert.equal(tabLabels.length, 5);
+  assert.ok(tabLabels.every(node => node.props.numberOfLines === 1));
+  assert.ok(tabLabels.some(node => textOf(node) === "Scorecard"));
+  const flattenStyle = style => Array.isArray(style)
+    ? Object.assign({}, ...style.map(flattenStyle)) : style || {};
+  assert.equal(flattenStyle(tabs.props.style).height, 60);
+  const brand = app.renderer.root.findAllByType("Text").find(node => node.props.testID === "app-brand");
+  assert.equal(brand.props.adjustsFontSizeToFit, true);
+  assert.equal(flattenStyle(brand.props.style).minWidth, 0);
+  assert.equal(app.renderer.root.findAllByProps({ testID: "main-content" })[0].type, "ScrollView");
+});
+
+test("large-text empty map grows naturally, with one status message and no absolute text overlay", async t => {
+  const app = await harness(t, { width: 360, fontScale: 2.5 });
+  const body = app.renderer.root.findAllByType("View").find(node => node.props.testID === "map-body");
+  const style = Object.assign({}, ...body.props.style);
+  assert.equal(style.height, undefined);
+  assert.equal(style.minHeight, 250);
+  const map = app.renderer.root.findAllByType("View").find(node => node.props.testID === "hole-map-panel");
+  assert.equal(map.findAllByType("Text").filter(node =>
+    textOf(node) === "Choose a course and tees to load its hole map.").length, 1);
+  assert.equal(map.findAllByType("View").some(node => node.props.style?.position === "absolute"), false);
+});
+
+const flattenStyle = style => Array.isArray(style)
+  ? Object.assign({}, ...style.map(flattenStyle)) : style || {};
+
+test("new DRC name uses two bounded lines without changing the Android application identifier", async t => {
+  const app = await harness(t);
+  const brand = app.renderer.root.findAllByType("Text").find(node => node.props.testID === "app-brand");
+  assert.equal(textOf(brand), "DRC GEMINI\nGOLF CADDIE");
+  assert.equal(brand.props.numberOfLines, 2);
+  assert.equal(brand.props.adjustsFontSizeToFit, true);
+  const config = JSON.parse(fs.readFileSync(path.join(rootDir, "app.json"), "utf8"));
+  assert.equal(config.expo.name, "DRC GEMINI GOLF CADDIE");
+  assert.equal(config.expo.android.package, "com.dalecopeland.mygeminigolfcaddie");
+});
+
+test("anti-glare applies to all five screens, buttons and the map rather than only Settings", async t => {
+  const app = await harness(t, { fontScale: 2 });
+  await app.tab("Settings");
+  const control = app.renderer.root.findAll(node =>
+    node.type === "Pressable" && node.props.accessibilityLabel === "ANTI-GLARE")[0];
+  assert.ok(control);
+  await act(async () => { control.props.onPress(); });
+  assert.equal(app.saved.at(-1).value.antiGlare, true);
+  for (const tab of ["Caddie", "Courses", "My Bag", "Scorecard", "Settings"]) {
+    await app.tab(tab);
+    const safe = app.renderer.root.findByType("SafeAreaView");
+    assert.equal(flattenStyle(safe.props.style).backgroundColor, "#000000", tab + " must be black");
+    const texts = app.renderer.root.findAllByType("Text");
+    assert.ok(texts.every(node => !["#D7B15C", "#AFBAC3"].includes(flattenStyle(node.props.style).color)),
+      tab + " must not retain low-contrast default styling");
+  }
+  await app.tab("Caddie");
+  const map = app.renderer.root.findAllByType("View").find(node => node.props.testID === "map-body");
+  assert.equal(flattenStyle(map.props.style).backgroundColor, "#000000");
+  const advice = app.renderer.root.findAll(node =>
+    node.type === "Pressable" && node.props.accessibilityLabel === "HEAR CADDIE ADVICE")[0];
+  assert.equal(flattenStyle(advice.props.style).backgroundColor, "#FFFFFF");
+  await app.chooseCourse();
+  assert.equal(app.renderer.root.findAllByType("Polyline")[0].props.stroke, "#FFFFFF");
+  assert.equal(app.renderer.root.findAllByType("Polygon")[0].props.stroke, "#FFFFFF");
+});
+
+test("anti-glare survives reopening and can switch back to the supplied navy-and-gold palette", async t => {
+  const app = await harness(t, { savedRound: { antiGlare: true } });
+  assert.equal(flattenStyle(app.renderer.root.findByType("SafeAreaView").props.style).backgroundColor, "#000000");
+  await app.tab("Settings");
+  const navy = app.renderer.root.findAll(node =>
+    node.type === "Pressable" && node.props.accessibilityLabel === "NAVY & GOLD")[0];
+  await act(async () => { navy.props.onPress(); });
+  assert.equal(flattenStyle(app.renderer.root.findByType("SafeAreaView").props.style).backgroundColor, "#030B12");
+  assert.equal(app.saved.at(-1).value.antiGlare, false);
 });

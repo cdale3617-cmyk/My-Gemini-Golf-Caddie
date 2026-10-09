@@ -1,4 +1,4 @@
-# My Gemini Golf Caddie
+# DRC GEMINI GOLF CADDIE
 
 A standalone Expo and React Native golf-caddie app. It keeps one hole in view at a time and saves the round, bag, and settings on the phone.
 
@@ -37,5 +37,11 @@ The workflow assembles the release variant (`app-release.apk`), not the debug va
 Before relying on the app during a round, verify location and microphone permissions, a mapped course, a course with missing geography, spoken commands, and persistence after closing/reopening on the S24. CI success does not prove that the phone's GPS or speech service works. Version 1.0.1 / Android version code 2 restores the map and microphone controls; the package identifier and saved-round storage key are unchanged.
 
 ## Local development
+
+Version 1.0.2 / Android version code 3 applies the user's navy/black-and-gold palette and name. The screen now reserves Android status, cutout and navigation areas, keeps tab labels unbroken with horizontal scrolling at large text sizes, and lets empty-map text grow instead of using a fixed-height text overlay. Large-text metrics wrap into additional rows.
+
+Settings → DISPLAY MODE → ANTI-GLARE switches every screen and the map to solid black, bright text and high-contrast outlines. It has no glossy textures or gradients. This is a display-contrast setting, not a physical anti-reflection treatment. The preference is saved with the existing round without changing the Android package or storage key.
+
+Automated layout tests inspect the safe-area structure and large-font rules, not native pixel geometry. A screenshot on the S24 is still required to validate the resulting spacing and native text measurements.
 
 Use Node.js 22, then run npm install, npm test, and npx expo start. GPS and native voice need a native Android build.

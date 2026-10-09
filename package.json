@@ -1,6 +1,6 @@
 {
   "name": "my-gemini-golf-caddie",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "private": true,
   "type": "module",
   "main": "node_modules/expo/AppEntry.js",
@@ -17,9 +17,12 @@
     "expo-location": "~57.0.2",
     "expo-speech": "~57.0.3",
     "expo-speech-recognition": "57.1.0",
+    "expo-splash-screen": "~57.0.9",
     "expo-status-bar": "~57.0.1",
+    "expo-system-ui": "~57.0.4",
     "react": "19.2.3",
     "react-native": "0.86.3",
+    "react-native-safe-area-context": "~5.7.0",
     "react-native-svg": "15.15.4"
   },
   "devDependencies": {
