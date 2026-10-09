@@ -1,21 +1,26 @@
 {
   "expo": {
-    "name": "My Gemini Golf Caddie",
+    "name": "DRC GEMINI GOLF CADDIE",
     "slug": "my-gemini-golf-caddie",
-    "version": "1.0.0",
+    "version": "1.0.2",
     "orientation": "portrait",
     "userInterfaceStyle": "dark",
     "android": {
       "package": "com.dalecopeland.mygeminigolfcaddie",
-      "versionCode": 1,
+      "versionCode": 3,
       "permissions": ["ACCESS_COARSE_LOCATION", "ACCESS_FINE_LOCATION", "RECORD_AUDIO"]
     },
     "ios": { "bundleIdentifier": "com.dalecopeland.mygeminigolfcaddie", "supportsTablet": true },
     "plugins": [
-      ["expo-location", { "locationWhenInUsePermission": "My Gemini Golf Caddie uses your location to measure distance to your saved green pin." }],
+      ["expo-splash-screen", {
+        "backgroundColor": "#030B12",
+        "dark": { "backgroundColor": "#000000" },
+        "android": { "drawable": { "icon": "./assets/splash-transparent.xml" } }
+      }],
+      ["expo-location", { "locationWhenInUsePermission": "DRC GEMINI GOLF CADDIE uses your location to measure distance to your saved green pin." }],
       ["expo-speech-recognition", {
-        "microphonePermission": "My Gemini Golf Caddie uses the microphone when you tap Voice Caddie.",
-        "speechRecognitionPermission": "My Gemini Golf Caddie converts your spoken caddie commands to text.",
+        "microphonePermission": "DRC GEMINI GOLF CADDIE uses the microphone when you tap Voice Caddie.",
+        "speechRecognitionPermission": "DRC GEMINI GOLF CADDIE converts your spoken caddie commands to text.",
         "androidSpeechServicePackages": ["com.google.android.googlequicksearchbox", "com.google.android.tts"]
       }]
     ]
