@@ -16,9 +16,9 @@ A standalone Expo and React Native golf-caddie app. It keeps one hole in view at
 
 ## Current limits
 
-Course search uses OpenStreetMap's Nominatim service, and hole shapes use OpenStreetMap's Overpass service. Course detail varies; some courses or holes have no mapped geometry. For those holes, stand by the green, start GPS, and save the green pin manually. Saved course features and round data stay on the phone. OpenStreetMap data is © OpenStreetMap contributors and licensed under ODbL; attribution is shown in the app. Starting club carries are examples; replace them with your own. Plays-like values are estimates.
+Course search and tee scorecards use GolfCourseAPI. Enter your own key in the app's Settings; it stays in memory only and must be entered again after restarting. Do not put keys in this repository. After selecting a course and tees, hole shapes use OpenStreetMap's Overpass service. Course detail varies; some courses or holes have no coordinates or mapped geometry. For those holes, stand by the green, start GPS, and save the green pin manually. Saved course features and round data stay on the phone. LOAD / RETRY MAP retries online without clearing saved scores or manually saved pins. OpenStreetMap data is © OpenStreetMap contributors and licensed under ODbL; attribution is shown in the app. Starting club carries are examples; replace them with your own. Plays-like values are estimates.
 
-Voice recognition uses the speech service installed on the phone. On Android, install or enable Speech Recognition & Synthesis if voice does not start. Voice needs the built APK; it does not work in Expo Go.
+Voice recognition uses the speech service installed on the phone. Tap TAP TO SPEAK and allow microphone permission; spoken commands include report yardage, mark green, next hole, previous hole, headwind 15, practice mode, and tournament mode. Wind commands use the selected km/h or mph unit. STOP LISTENING cancels recognition; HEAR CADDIE ADVICE is the separate text-to-speech button. On Android, enable Speech Recognition & Synthesis if the app reports that no speech service is available. Voice needs the built APK; it does not work in Expo Go.
 
 ## Download the APK
 
@@ -28,7 +28,13 @@ Voice recognition uses the speech service installed on the phone. On Android, in
 4. Open the completed run and download the My-Gemini-Golf-Caddie-APK artifact.
 5. Extract the APK and install it on Android.
 
-The Actions artifact is a debug APK for testing. A signed Play Store release needs a signing setup.
+The workflow assembles the release variant (`app-release.apk`), not the debug variant. This is still a testing build, not a verified store release; a private production signing setup and real-device validation are separate requirements. To keep saved round data, do not uninstall the existing app merely to work around an update/signature error.
+
+## Regression checks and phone validation
+
+`npm test` includes screen-level tests that render App.js with mocked Android services and exercise course/tee selection, SVG hole-map rendering, saved-map restoration, voice permission handling, and final spoken commands. These tests catch disconnected UI integrations; they are not physical-device tests.
+
+Before relying on the app during a round, verify location and microphone permissions, a mapped course, a course with missing geography, spoken commands, and persistence after closing/reopening on the S24. CI success does not prove that the phone's GPS or speech service works. Version 1.0.1 / Android version code 2 restores the map and microphone controls; the package identifier and saved-round storage key are unchanged.
 
 ## Local development
 

@@ -15,7 +15,20 @@ import {
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Location from "expo-location";
 import * as Speech from "expo-speech";
+import {
+  ExpoSpeechRecognitionModule,
+  useSpeechRecognitionEvent
+} from "expo-speech-recognition";
 import { StatusBar as ExpoStatusBar } from "expo-status-bar";
+import HoleMap from "./src/HoleMap.js";
+import { featuresForHole, fetchCourseFeatures, osmCourseQuery } from "./src/courseMap.js";
+import {
+  addMappedPins,
+  coordinatesForCourse,
+  parseVoiceCommand,
+  startVoiceRecognition
+} from "./src/appFeatures.js";
+import appConfig from "./app.json";
 
 const GREEN = "#0D241B";
 const PANEL = "#142D23";
@@ -174,6 +187,8 @@ function Button({ title, onPress, primary, disabled }) {
     <Pressable
       onPress={onPress}
       disabled={disabled}
+      accessibilityRole="button"
+      accessibilityLabel={title}
       style={[
         styles.button,
         primary && styles.primary,
@@ -253,6 +268,13 @@ export default function App() {
   const [results, setResults] = useState([]);
   const [selected, setSelected] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [courseFeatures, setCourseFeatures] = useState([]);
+  const [mapStatus, setMapStatus] = useState("Choose a course and tees to load its hole map.");
+  const [mapBusy, setMapBusy] = useState(false);
+  const [voiceListening, setVoiceListening] = useState(false);
+  const [voicePending, setVoicePending] = useState(false);
+  const [voiceStatus, setVoiceStatus] = useState("Voice is off.");
+  const [transcript, setTranscript] = useState("");
 
   const [gps, setGps] = useState(null);
   const [gpsOn, setGpsOn] = useState(false);
@@ -264,9 +286,15 @@ export default function App() {
   const [loaded, setLoaded] = useState(false);
 
   const gpsWatch = useRef(null);
+  const mapRequestId = useRef(0);
+  const voiceRequestId = useRef(0);
+  const voiceRequestPending = useRef(false);
+  const voiceActive = useRef(false);
+  const mounted = useRef(true);
   const hole = round.holes[holeIndex];
 
   useEffect(() => {
+    mounted.current = true;
     async function restore() {
       try {
         const raw = await AsyncStorage.getItem(STORE);
@@ -279,6 +307,12 @@ export default function App() {
           if (typeof d.tournament === "boolean") {
             setTournament(d.tournament);
           }
+          if (Array.isArray(d.courseFeatures)) {
+            setCourseFeatures(d.courseFeatures);
+            setMapStatus(d.courseFeatures.length
+              ? "Saved OpenStreetMap features loaded from this phone."
+              : "No saved hole map. Choose a course or tap LOAD / RETRY MAP online.");
+          }
         }
       } catch (e) {
         console.warn(e);
@@ -290,8 +324,13 @@ export default function App() {
     restore();
 
     return () => {
+      mounted.current = false;
+      mapRequestId.current += 1;
+      voiceRequestId.current += 1;
+      voiceActive.current = false;
       gpsWatch.current?.remove();
       Speech.stop();
+      try { ExpoSpeechRecognitionModule.abort(); } catch {}
     };
   }, []);
 
@@ -305,10 +344,11 @@ export default function App() {
         bag,
         unit,
         windUnit,
-        tournament
+        tournament,
+        courseFeatures
       })
     ).catch(console.warn);
-  }, [loaded, round, bag, unit, windUnit, tournament]);
+  }, [loaded, round, bag, unit, windUnit, tournament, courseFeatures]);
 
   function displayDistance(m) {
     if (m == null || !Number.isFinite(Number(m))) {
@@ -417,12 +457,42 @@ export default function App() {
     }
   }
 
+  async function loadCourseMap(mapRound) {
+    const requestId = ++mapRequestId.current;
+    if (!mapRound.courseCoordinates) {
+      setMapBusy(false);
+      setMapStatus("No course coordinates available. GPS still works with a manually saved green pin.");
+      return;
+    }
+
+    setMapBusy(true);
+    setMapStatus("Loading OpenStreetMap hole features...");
+    try {
+      const { latitude, longitude } = mapRound.courseCoordinates;
+      const elements = await fetchCourseFeatures(osmCourseQuery(latitude, longitude));
+      if (!mounted.current || requestId !== mapRequestId.current) return;
+      setCourseFeatures(elements);
+      setRound(current => current.courseKey === mapRound.courseKey
+        ? addMappedPins(current, elements) : current);
+      setMapStatus(elements.length
+        ? "OpenStreetMap features loaded. Detail varies by hole."
+        : "No mapped features found here. Your scorecard is saved; mark the green manually for GPS.");
+    } catch {
+      if (!mounted.current || requestId !== mapRequestId.current) return;
+      setMapStatus("Map service unavailable. Saved maps, scores and green pins are unchanged. Retry online.");
+    } finally {
+      if (mounted.current && requestId === mapRequestId.current) setMapBusy(false);
+    }
+  }
+
   function loadTee(tee) {
     if (!selected) return;
 
     const next = {
       name: courseName(selected),
       tee: tee.label,
+      courseKey: String(selected.id ?? courseName(selected)) + ":" + tee.id,
+      courseCoordinates: coordinatesForCourse(selected),
       holes: tee.holes.map((h, i) => ({
         number: i + 1,
         par: Number(h.par) || 4,
@@ -440,7 +510,9 @@ export default function App() {
       setScore("");
       setSelected(null);
       setResults([]);
+      setCourseFeatures([]);
       setStatus("Course and scorecard loaded.");
+      void loadCourseMap(next);
     };
 
     if (round.holes.some(h => h.score !== "")) {
@@ -592,6 +664,86 @@ export default function App() {
     });
   }
 
+  async function startVoice() {
+    if (voiceRequestPending.current || voiceActive.current) return;
+    const requestId = ++voiceRequestId.current;
+    voiceRequestPending.current = true;
+    voiceActive.current = true;
+    setVoicePending(true);
+    setVoiceStatus("Checking microphone permission...");
+    Speech.stop();
+    const result = await startVoiceRecognition(
+      ExpoSpeechRecognitionModule,
+      () => mounted.current && requestId === voiceRequestId.current
+    );
+    if (!mounted.current || requestId !== voiceRequestId.current) return;
+    voiceRequestPending.current = false;
+    voiceActive.current = result.started;
+    setVoicePending(false);
+    setVoiceListening(result.started);
+    setVoiceStatus(result.message);
+  }
+
+  function stopVoice() {
+    voiceRequestId.current += 1;
+    voiceRequestPending.current = false;
+    voiceActive.current = false;
+    try { ExpoSpeechRecognitionModule.abort(); } catch {}
+    setVoicePending(false);
+    setVoiceListening(false);
+    setVoiceStatus("Voice is off.");
+  }
+
+  function handleVoiceCommand(raw) {
+    const command = parseVoiceCommand(raw);
+    if (!command) return;
+    switch (command.type) {
+      case "mark-green": markGreen(); break;
+      case "next-hole": go(1); break;
+      case "previous-hole": go(-1); break;
+      case "start-gps": void startGps(); break;
+      case "stop-gps": stopGps(); break;
+      case "tournament": setTournament(true); break;
+      case "practice": setTournament(false); break;
+      case "wind":
+        setWindDirection(command.direction);
+        // Spoken speed uses the currently selected km/h or mph display unit.
+        if (command.speed != null) setWind(String(command.speed));
+        break;
+      case "report": caddieAdvice(); break;
+      default:
+        setVoiceStatus("Try report yardage, mark green, next hole, headwind 15, or practice mode.");
+    }
+  }
+
+  useSpeechRecognitionEvent("start", () => {
+    if (!voiceActive.current) return;
+    setVoiceListening(true);
+    setVoiceStatus("Listening — speak now.");
+  });
+  useSpeechRecognitionEvent("end", () => {
+    voiceActive.current = false;
+    setVoiceListening(false);
+    setVoiceStatus(current => current.startsWith("Listening") ? "Voice is off." : current);
+  });
+  useSpeechRecognitionEvent("error", event => {
+    voiceActive.current = false;
+    setVoiceListening(false);
+    setVoiceStatus("Voice error: " + event.error + ". Check microphone permission and speech service.");
+  });
+  useSpeechRecognitionEvent("result", event => {
+    if (!voiceActive.current) return;
+    const text = event.results?.[0]?.transcript;
+    if (!text) return;
+    setTranscript(text);
+    if (event.isFinal) {
+      // Interim and duplicate final events must never move two holes.
+      voiceActive.current = false;
+      // Keep the start button disabled until the native "end" event arrives.
+      handleVoiceCommand(text);
+    }
+  });
+
   const completed = round.holes.filter(
     h => h.score !== ""
   ).length;
@@ -686,6 +838,20 @@ export default function App() {
               </Text>
             </View>
 
+            <View style={styles.panel} testID="hole-map-panel">
+              <Text style={styles.gold}>HOLE {hole.number} MAP</Text>
+              <HoleMap
+                features={featuresForHole(courseFeatures, hole.number)}
+                status={mapStatus}
+              />
+              <Text style={styles.small}>{mapStatus}</Text>
+              <Button
+                title={mapBusy ? "LOADING MAP..." : "LOAD / RETRY MAP"}
+                onPress={() => loadCourseMap(round)}
+                disabled={mapBusy || !round.courseCoordinates}
+              />
+            </View>
+
             <View style={styles.panel}>
               <Text style={styles.gold}>LIVE GPS</Text>
               <View style={styles.row}>
@@ -754,6 +920,24 @@ export default function App() {
 
             <View style={styles.panel}>
               <Text style={styles.gold}>VOICE CADDIE</Text>
+              <View style={styles.row}>
+                <Button
+                  title={voicePending ? "STARTING VOICE..." : voiceListening ? "LISTENING..." : "TAP TO SPEAK"}
+                  onPress={startVoice}
+                  disabled={voicePending || voiceListening}
+                  primary
+                />
+                <Button
+                  title="STOP LISTENING"
+                  onPress={stopVoice}
+                  disabled={!voicePending && !voiceListening}
+                />
+              </View>
+              <Text style={styles.small}>{voiceStatus}</Text>
+              {transcript ? <Text style={styles.white}>{transcript}</Text> : null}
+              <Text style={styles.small}>
+                Try report yardage, mark green, next hole, headwind 15, or practice mode.
+              </Text>
               <Button
                 title="HEAR CADDIE ADVICE"
                 onPress={caddieAdvice}
@@ -985,6 +1169,14 @@ export default function App() {
             <Text style={styles.small}>
               Check competition rules before using electronic distance
               measurement or advice.
+            </Text>
+            <Text style={styles.gold}>ABOUT THIS BUILD</Text>
+            <Text style={styles.small}>
+              Version {appConfig.expo.version}. Course search requires your GolfCourseAPI key.
+              The key stays in memory only; enter it again after restarting.
+              Hole maps use OpenStreetMap and are saved with the round.
+              Some courses have no mapped features. Voice requires microphone permission
+              and an enabled Android speech service.
             </Text>
           </View>
         )}
