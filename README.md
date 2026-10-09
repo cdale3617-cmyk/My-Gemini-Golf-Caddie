@@ -42,6 +42,8 @@ Version 1.0.2 / Android version code 3 applies the user's navy/black-and-gold pa
 
 Settings → DISPLAY MODE → ANTI-GLARE switches every screen and the map to solid black, bright text and high-contrast outlines. It has no glossy textures or gradients. This is a display-contrast setting, not a physical anti-reflection treatment. The preference is saved with the existing round without changing the Android package or storage key.
 
+Android startup uses a transparent vector drawable on the dark background. The Expo splash plugin requires a real drawable resource even when no visible logo is wanted. Native-display regression tests check the configured source and the SDK's generated splash resource to prevent the missing-resource release build failure.
+
 Automated layout tests inspect the safe-area structure and large-font rules, not native pixel geometry. A screenshot on the S24 is still required to validate the resulting spacing and native text measurements.
 
 Use Node.js 22, then run npm install, npm test, and npx expo start. GPS and native voice need a native Android build.
